@@ -56,45 +56,46 @@ class Video_Caption_Generator():
         probs = []
         loss = 0.0
 
-        ##############################  Encoding Stage ##################################
-        for i in range(0, self.n_video_lstm_step):
-            if i > 0:
+        with tf.variable_scope(tf.get_variable_scope()) as scope:
+            ##############################  Encoding Stage ##################################
+            for i in range(0, self.n_video_lstm_step):
+                if i > 0:
+                    tf.get_variable_scope().reuse_variables()
+
+                with tf.variable_scope("LSTM1"):
+                    output1, state1 = self.lstm1(image_emb[:,i,:], state1)
+
+                with tf.variable_scope("LSTM2"):
+                    output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
+
+            ############################# Decoding Stage ######################################
+            for i in range(0, self.n_caption_lstm_step): ## Phase 2 => only generate captions
+                #if i == 0:
+                #    current_embed = tf.zeros([self.batch_size, self.dim_hidden])
+                #else:
+                with tf.device("/cpu:0"):
+                    current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
+
                 tf.get_variable_scope().reuse_variables()
 
-            with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1(image_emb[:,i,:], state1)
+                with tf.variable_scope("LSTM1"):
+                    output1, state1 = self.lstm1(padding, state1)
 
-            with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2(tf.concat(1, [padding, output1]), state2)
+                with tf.variable_scope("LSTM2"):
+                    output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)
 
-        ############################# Decoding Stage ######################################
-        for i in range(0, self.n_caption_lstm_step): ## Phase 2 => only generate captions
-            #if i == 0:
-            #    current_embed = tf.zeros([self.batch_size, self.dim_hidden])
-            #else:
-            with tf.device("/cpu:0"):
-                current_embed = tf.nn.embedding_lookup(self.Wemb, caption[:, i])
+                labels = tf.expand_dims(caption[:, i+1], 1)
+                indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
+                concated = tf.concat([indices, labels], 1)
+                onehot_labels = tf.sparse_to_dense(concated, tf.stack([self.batch_size, self.n_words]), 1.0, 0.0)
 
-            tf.get_variable_scope().reuse_variables()
+                logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logit_words, labels=onehot_labels)
+                cross_entropy = cross_entropy * caption_mask[:,i]
+                probs.append(logit_words)
 
-            with tf.variable_scope("LSTM1"):
-                output1, state1 = self.lstm1(padding, state1)
-
-            with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2(tf.concat(1, [current_embed, output1]), state2)
-
-            labels = tf.expand_dims(caption[:, i+1], 1)
-            indices = tf.expand_dims(tf.range(0, self.batch_size, 1), 1)
-            concated = tf.concat(1, [indices, labels])
-            onehot_labels = tf.sparse_to_dense(concated, tf.pack([self.batch_size, self.n_words]), 1.0, 0.0)
-
-            logit_words = tf.nn.xw_plus_b(output2, self.embed_word_W, self.embed_word_b)
-            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logit_words, onehot_labels)
-            cross_entropy = cross_entropy * caption_mask[:,i]
-            probs.append(logit_words)
-
-            current_loss = tf.reduce_sum(cross_entropy)/self.batch_size
-            loss = loss + current_loss
+                current_loss = tf.reduce_sum(cross_entropy)/self.batch_size
+                loss = loss + current_loss
 
         return loss, video, video_mask, caption, caption_mask, probs
 
@@ -124,7 +125,7 @@ class Video_Caption_Generator():
                 output1, state1 = self.lstm1(image_emb[:, i, :], state1)
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2(tf.concat(1, [padding, output1]), state2)
+                output2, state2 = self.lstm2(tf.concat([padding, output1], 1), state2)
 
         for i in range(0, self.n_caption_lstm_step):
             tf.get_variable_scope().reuse_variables()
@@ -137,7 +138,7 @@ class Video_Caption_Generator():
                 output1, state1 = self.lstm1(padding, state1)
 
             with tf.variable_scope("LSTM2"):
-                output2, state2 = self.lstm2(tf.concat(1, [current_embed, output1]), state2)
+                output2, state2 = self.lstm2(tf.concat([current_embed, output1], 1), state2)
 
             logit_words = tf.nn.xw_plus_b( output2, self.embed_word_W, self.embed_word_b)
             max_prob_index = tf.argmax(logit_words, 1)[0]
@@ -156,13 +157,13 @@ class Video_Caption_Generator():
 #=====================================================================================
 # Global Parameters
 #=====================================================================================
-video_path = '/home/chenxp/data/msvd'
+video_path = '/home/jaehui/Downloads/msvd/YouTubeClips'
 
-video_train_feat_path = './rgb_train_features'
-video_test_feat_path = './rgb_test_features'
+video_train_feat_path = '/home/jaehui/Downloads/msvd/YouTubeClips/tmps'
+video_test_feat_path = '/home/jaehui/Downloads/msvd/test'
 
-video_train_data_path = './data/video_corpus.csv'
-video_test_data_path = './data/video_corpus.csv'
+video_train_data_path = '/home/jaehui/Downloads/msvd/msvd.csv'
+video_test_data_path = '/home/jaehui/Downloads/msvd/test/msvd.csv'
 
 model_path = './models'
 
@@ -170,7 +171,7 @@ model_path = './models'
 # Train Parameters
 #=======================================================================================
 dim_image = 4096
-dim_hidden= 1000
+dim_hidden= 1000 #hidden units of lstm
 
 n_video_lstm_step = 80
 n_caption_lstm_step = 20
@@ -184,7 +185,7 @@ learning_rate = 0.0001
 def get_video_train_data(video_data_path, video_feat_path):
     video_data = pd.read_csv(video_data_path, sep=',')
     video_data = video_data[video_data['Language'] == 'English']
-    video_data['video_path'] = video_data.apply(lambda row: row['VideoID']+'_'+str(int(row['Start']))+'_'+str(int(row['End']))+'.avi.npy', axis=1)
+    video_data['video_path'] = video_data.apply(lambda row: row['VideoID']+'_'+str(int(row['Start']))+'_'+str(int(row['End']))+'_rgb.npy', axis=1)
     video_data['video_path'] = video_data['video_path'].map(lambda x: os.path.join(video_feat_path, x))
     video_data = video_data[video_data['video_path'].map(lambda x: os.path.exists( x ))]
     video_data = video_data[video_data['Description'].map(lambda x: isinstance(x, str))]
@@ -196,7 +197,7 @@ def get_video_train_data(video_data_path, video_feat_path):
 def get_video_test_data(video_data_path, video_feat_path):
     video_data = pd.read_csv(video_data_path, sep=',')
     video_data = video_data[video_data['Language'] == 'English']
-    video_data['video_path'] = video_data.apply(lambda row: row['VideoID']+'_'+str(int(row['Start']))+'_'+str(int(row['End']))+'.avi.npy', axis=1)
+    video_data['video_path'] = video_data.apply(lambda row: row['VideoID']+'_'+str(int(row['Start']))+'_'+str(int(row['End']))+'_rgb.npy', axis=1)
     video_data['video_path'] = video_data['video_path'].map(lambda x: os.path.join(video_feat_path, x))
     video_data = video_data[video_data['video_path'].map(lambda x: os.path.exists( x ))]
     video_data = video_data[video_data['Description'].map(lambda x: isinstance(x, str))]
@@ -281,15 +282,17 @@ def train():
 
     tf_loss, tf_video, tf_video_mask, tf_caption, tf_caption_mask, tf_probs = model.build_model()
     sess = tf.InteractiveSession()
-    
+
+
     # my tensorflow version is 0.12.1, I write the saver with version 1.0
     saver = tf.train.Saver(max_to_keep=100, write_version=1)
     train_op = tf.train.AdamOptimizer(learning_rate).minimize(tf_loss)
     tf.global_variables_initializer().run()
 
-    #new_saver = tf.train.Saver()
-    #new_saver = tf.train.import_meta_graph('./rgb_models/model-1000.meta')
-    #new_saver.restore(sess, tf.train.latest_checkpoint('./models/'))
+    new_saver = tf.train.Saver()
+    new_saver = tf.train.import_meta_graph('./models/model-250.meta')
+    new_saver.restore(sess, tf.train.latest_checkpoint('./models'))
+    saver = new_saver
 
     loss_fd = open('loss.txt', 'w')
     loss_to_draw = []
@@ -301,7 +304,7 @@ def train():
         np.random.shuffle(index)
         train_data = train_data.ix[index]
 
-        current_train_data = train_data.groupby('video_path').apply(lambda x: x.irow(np.random.choice(len(x))))
+        current_train_data = train_data.groupby('video_path').apply(lambda x: x.iloc[np.random.choice(len(x))])
         current_train_data = current_train_data.reset_index(drop=True)
 
         for start, end in zip(
@@ -319,6 +322,8 @@ def train():
             current_video_masks = np.zeros((batch_size, n_video_lstm_step))
 
             for ind,feat in enumerate(current_feats_vals):
+                feat = np.squeeze(feat, axis=1)
+                feat = feat[:80,:]
                 current_feats[ind][:len(current_feats_vals[ind])] = feat
                 current_video_masks[ind][:len(current_feats_vals[ind])] = 1
 
@@ -393,7 +398,7 @@ def train():
 
     loss_fd.close()
 
-def test(model_path='./models/model-100'):
+def test(model_path='./models/model-990'):
     test_data = get_video_test_data(video_test_data_path, video_test_feat_path)
     test_videos = test_data['video_path'].unique()
 
@@ -423,6 +428,9 @@ def test(model_path='./models/model-100'):
         print idx, video_feat_path
 
         video_feat = np.load(video_feat_path)[None,...]
+        video_feat = np.squeeze(video_feat, axis=2)
+        video_feat = video_feat[:,:80,:]
+        print video_feat.shape
         #video_feat = np.load(video_feat_path)
         #video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
         if video_feat.shape[1] == n_frame_step:
@@ -447,3 +455,6 @@ def test(model_path='./models/model-100'):
         test_output_txt_fd.write(video_feat_path + '\n')
         test_output_txt_fd.write(generated_sentence + '\n\n')
 
+if __name__=="__main__":
+    #train()
+    test()

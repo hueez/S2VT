@@ -25,8 +25,8 @@ avi_npy_basenames = map(lambda item: os.path.basename(item), avi_names_lists)
 
 avi_names = []
 for each_avi in avi_npy_basenames:
-    tmp1, tmp2, tmp3 = each_avi.split('.')
-    avi_names.append(tmp1)
+    tmp1, tmp2 = each_avi.split('.')
+    avi_names.append(tmp1[:tmp1.rfind("_")])
 
 fd = open('map_videoID.pkl', 'rb')
 map_videoID = cPickle.load(fd)
